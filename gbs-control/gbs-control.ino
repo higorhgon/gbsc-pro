@@ -797,7 +797,7 @@ static inline void setScreenVScale(uint16_t v)  { if (isPalGroup()) uopt->screen
 
 void setResetParameters()
 {
-    SerialM.println("<reset>");
+    SerialM.printf("[%lu] <reset>\n", millis());
     rto->videoStandardInput = 0;
     rto->videoIsFrozen = false;
     rto->applyPresetDoneStage = 0;
@@ -6546,6 +6546,7 @@ void runSyncWatcher()
     static uint16_t activeStableLineCount = 0;
     static unsigned long lastSyncDrop = millis();
     static unsigned long lastLineCountMeasure = millis();
+    static unsigned long syncLostAt = 0;
 
     uint16_t thisStableLineCount = 0;
     uint8_t detectedVideoMode = getVideoMode();
@@ -6672,6 +6673,8 @@ void runSyncWatcher()
         rto->continousStableCounter = 0;
         lastVsyncLock = millis(); // best reset this
         if (rto->noSyncCounter == 1) {
+            syncLostAt = millis();
+            SerialM.printf("\n[%lu] sync lost (mode %d)\n", syncLostAt, rto->videoStandardInput);
             freezeVideo();
             return; // do nothing else
         }
@@ -6851,6 +6854,9 @@ void runSyncWatcher()
         // before thoroughly checking for a mode change, watch format via newVideoModeCounter
         if (newVideoModeCounter < 255) {
             newVideoModeCounter++;
+            if (newVideoModeCounter == 1) {
+                SerialM.printf("\n[%lu] new format? %d -> %d\n", millis(), rto->videoStandardInput, detectedVideoMode);
+            }
             rto->continousStableCounter = 0; // usually already 0, but occasionally not
             if (newVideoModeCounter > 1) {   // help debug a few commits worth
                 if (newVideoModeCounter == 2) {
@@ -6888,6 +6894,8 @@ void runSyncWatcher()
                 SerialM.print(" ");
                 SerialM.print(vidModeReadout);
                 SerialM.println(F(" <stable>"));
+                SerialM.printf("[%lu] format change %d -> %d, reloading preset (output restarts)\n",
+                               millis(), rto->videoStandardInput, detectedVideoMode);
                 //Serial.print("Old: "); Serial.print(rto->videoStandardInput);
                 //Serial.print(" New: "); Serial.println(detectedVideoMode);
                 rto->videoIsFrozen = false;
@@ -6956,6 +6964,10 @@ void runSyncWatcher()
             SerialM.println();
         }
 
+        if (rto->noSyncCounter != 0) {
+            SerialM.printf("[%lu] sync back after %lums (mode %d)\n",
+                           millis(), millis() - syncLostAt, rto->videoStandardInput);
+        }
         rto->noSyncCounter = 0;
         newVideoModeCounter = 0;
 
