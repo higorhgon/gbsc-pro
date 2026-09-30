@@ -1,0 +1,48 @@
+name: Build ESP8266 firmware
+
+on:
+  push:
+    paths:
+      - "gbs-control/**"
+      - ".github/workflows/build-firmware.yml"
+  pull_request:
+    paths:
+      - "gbs-control/**"
+  workflow_dispatch:
+
+jobs:
+  esp8266:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-${{ runner.os }}-${{ hashFiles('gbs-control/platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build
+        working-directory: gbs-control
+        run: pio run
+
+      - name: Name the binary
+        id: bin
+        run: |
+          name="gbsc-pro-esp8266-${GITHUB_REF_NAME//\//-}-${GITHUB_SHA::7}"
+          cp gbs-control/.pio/build/gbsc-pro/firmware.bin "$name.bin"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.bin.outputs.name }}
+          path: ${{ steps.bin.outputs.name }}.bin
+          if-no-files-found: error
