@@ -1956,6 +1956,26 @@ section[name="alert"] {
                   toggle_off
                 </td>
               </tr>
+              <tr>
+                <td>
+                  1080p 16:9 Fill
+                  <!-- prettier-ignore -->
+                  <ul class="gbs-help">
+                    <li>The 1920 x 1080 preset shows 4:3 sources pillarboxed inside the 16:9 frame.</li>
+                    <li>Enable this for anamorphic widescreen games (PS2, Wii, GameCube) to stretch the picture to the full width.</li>
+                    <li>Fine tune with Scale / Borders, then save the slot to keep it.</li>
+                  </ul>
+                </td>
+                <td
+                  gbs-message="Y"
+                  gbs-message-type="user"
+                  gbs-click="normal"
+                  class="gbs-icon"
+                  gbs-toggle-switch="wide1080p"
+                >
+                  toggle_off
+                </td>
+              </tr>
               <!-- PRO: Low Res Upscaling and Output Component not supported
               <tr>
                 <td>
@@ -2738,8 +2758,10 @@ section[name="alert"] {
         { name: "screenVScale_pal", type: "uint16le", size: 2 },
         // --- PRO: Per-slot SyncWatcher override (added in v2.4.0) ---
         { name: "slotSyncwatcherMode", type: "byte", size: 1 },
+        // --- PRO: 1080p 16:9 fill ---
+        { name: "wantWide1080p", type: "byte", size: 1 },
         // --- Reserved for future expansion ---
-        { name: "reserved", type: "byte", size: 22 },
+        { name: "reserved", type: "byte", size: 21 },
     ],
 };
 // =====================================================================
@@ -3341,6 +3363,9 @@ const createWebSocket = () => {
                         //   break;
                         case "disableExternalClockGenerator":
                             toggleMethod(button, (optionByte2 & 0x04) == 0x04);
+                            break;
+                        case "wide1080p":
+                            toggleMethod(button, (optionByte2 & 0x08) == 0x08);
                             break;
                     }
                 });

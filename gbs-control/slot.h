@@ -106,8 +106,10 @@ typedef struct
     uint16_t screenVScale_pal;
     // --- PRO: Per-slot SyncWatcher override ---
     uint8_t  slotSyncwatcherMode;  // 0=inherit global, 1=force ON, 2=force OFF
+    // --- PRO: 1080p 16:9 fill (anamorphic widescreen sources) ---
+    uint8_t  wantWide1080p;        // 0=off (stock 4:3 pillarbox), 1=on
     // --- Reserved for future expansion (do not use directly) ---
-    uint8_t reserved[22];        // Padding to make SlotMeta 128 bytes total
+    uint8_t reserved[21];        // Padding to make SlotMeta 128 bytes total
 } __attribute__((packed)) SlotMeta;
 
 // Ensure SlotMeta is exactly 128 bytes (webapp and firmware must match)

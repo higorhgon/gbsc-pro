@@ -1245,6 +1245,26 @@
                   toggle_off
                 </td>
               </tr>
+              <tr>
+                <td>
+                  1080p 16:9 Fill
+                  <!-- prettier-ignore -->
+                  <ul class="gbs-help">
+                    <li>The 1920 x 1080 preset shows 4:3 sources pillarboxed inside the 16:9 frame.</li>
+                    <li>Enable this for anamorphic widescreen games (PS2, Wii, GameCube) to stretch the picture to the full width.</li>
+                    <li>Fine tune with Scale / Borders, then save the slot to keep it.</li>
+                  </ul>
+                </td>
+                <td
+                  gbs-message="Y"
+                  gbs-message-type="user"
+                  gbs-click="normal"
+                  class="gbs-icon"
+                  gbs-toggle-switch="wide1080p"
+                >
+                  toggle_off
+                </td>
+              </tr>
               <!-- PRO: Low Res Upscaling and Output Component not supported
               <tr>
                 <td>

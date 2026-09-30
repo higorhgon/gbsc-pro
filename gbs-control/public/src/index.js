@@ -82,8 +82,10 @@ const Structs = {
         { name: "screenVScale_pal", type: "uint16le", size: 2 },
         // --- PRO: Per-slot SyncWatcher override (added in v2.4.0) ---
         { name: "slotSyncwatcherMode", type: "byte", size: 1 },
+        // --- PRO: 1080p 16:9 fill ---
+        { name: "wantWide1080p", type: "byte", size: 1 },
         // --- Reserved for future expansion ---
-        { name: "reserved", type: "byte", size: 22 },
+        { name: "reserved", type: "byte", size: 21 },
     ],
 };
 // =====================================================================
@@ -685,6 +687,9 @@ const createWebSocket = () => {
                         //   break;
                         case "disableExternalClockGenerator":
                             toggleMethod(button, (optionByte2 & 0x04) == 0x04);
+                            break;
+                        case "wide1080p":
+                            toggleMethod(button, (optionByte2 & 0x08) == 0x08);
                             break;
                     }
                 });

@@ -140,6 +140,8 @@ enum TVMODE_PresetPreference : uint8_t {
     uint16_t screenHScale_pal; \
     uint16_t screenVScale_pal; \
     /* Per-slot SyncWatcher override */ \
-    uint8_t  slotSyncwatcherMode;   /* 0=inherit global, 1=force ON, 2=force OFF */
+    uint8_t  slotSyncwatcherMode;   /* 0=inherit global, 1=force ON, 2=force OFF */ \
+    /* 1080p 16:9 fill (anamorphic widescreen sources) */ \
+    uint8_t  wantWide1080p;         /* 0=4:3 pillarbox (stock), 1=stretch to 16:9 */
 
 #endif // OPTIONS_PRO_H_

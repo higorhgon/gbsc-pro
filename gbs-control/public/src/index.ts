@@ -93,8 +93,10 @@ const Structs: StructDescriptors = {
     { name: "screenVScale_pal", type: "uint16le", size: 2 },
     // --- PRO: Per-slot SyncWatcher override (added in v2.4.0) ---
     { name: "slotSyncwatcherMode", type: "byte", size: 1 }, // 0=inherit global, 1=force ON, 2=force OFF
+    // --- PRO: 1080p 16:9 fill ---
+    { name: "wantWide1080p", type: "byte", size: 1 }, // 0=off (4:3 pillarbox), 1=on
     // --- Reserved for future expansion ---
-    { name: "reserved", type: "byte", size: 22 },
+    { name: "reserved", type: "byte", size: 21 },
   ],
 };
 
@@ -767,6 +769,9 @@ const createWebSocket = () => {
             //   break;
             case "disableExternalClockGenerator":
               toggleMethod(button, (optionByte2 & 0x04) == 0x04);
+              break;
+            case "wide1080p":
+              toggleMethod(button, (optionByte2 & 0x08) == 0x08);
               break;
           }
         });

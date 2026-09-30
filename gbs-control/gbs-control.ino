@@ -3300,6 +3300,121 @@ uint32_t getPllRate()
 
 #define AUTO_GAIN_INIT 0x48
 
+// Pro: 1080p 16:9 fill for anamorphic widescreen sources (PS2, Wii, GameCube...).
+//
+// The stock 1080p presets (0x05 NTSC / 0x15 PAL) output a 4:3 image pillarboxed
+// inside the 16:9 frame, with the VDS horizontal scaler bypassed (1:1). Unlike
+// 960p/1024p (a 4:3 signal the TV can stretch), the side bars are part of the
+// 1080p signal, so a TV in game mode has nothing left to stretch.
+//
+// This widens the display blanking window (VDS_DIS_HB) and the memory blanking
+// window (VDS_HB) around their centers by the same factor and enables the
+// horizontal scaler with the matching ratio, so the same source line covers
+// ~the full 16:9 width.
+//
+// Only applied on top of built-in presets: a custom (slot) preset is a full
+// register dump and already contains whatever window/scale was saved with it.
+// Fine tuning: use Scale / Borders in the web UI, then save the slot.
+#ifndef WIDE1080P_ACTIVE_RATIO
+#define WIDE1080P_ACTIVE_RATIO 0.8727f // 1920 / 2200 (CEA-861 1080p active / total)
+#endif
+#define WIDE1080P_BACK_PORCH_MIN 24    // clocks kept between HSync end and active start
+#define WIDE1080P_FRONT_PORCH_MIN 16   // clocks kept between active end and HTotal
+
+void applyWide1080p()
+{
+    if (!uopt->wantWide1080p) {
+        return;
+    }
+    if (rto->presetID != 0x05 && rto->presetID != 0x15) {
+        return;
+    }
+    if (rto->isCustomPreset || rto->outModeHdBypass) {
+        return;
+    }
+
+    const uint16_t htotal = GBS::VDS_HSYNC_RST::read();
+    const uint16_t hsSt = GBS::VDS_HS_ST::read();
+    const uint16_t hsSp = GBS::VDS_HS_SP::read();
+    const uint16_t disSt = GBS::VDS_DIS_HB_ST::read(); // active end
+    const uint16_t disSp = GBS::VDS_DIS_HB_SP::read(); // active start
+    const uint16_t memSt = GBS::VDS_HB_ST::read();
+    const uint16_t memSp = GBS::VDS_HB_SP::read();
+
+    // The stock presets have non-wrapped windows (SP < ST) and HSync near 0.
+    // Anything else means the timings were changed elsewhere: don't guess.
+    if (disSp >= disSt || memSp >= memSt || htotal == 0) {
+        SerialM.println(F("wide1080p: unexpected H windows, skipped"));
+        return;
+    }
+
+    const uint16_t hsEnd = (hsSt > hsSp) ? hsSt : hsSp;
+    const uint16_t minSp = hsEnd + WIDE1080P_BACK_PORCH_MIN;
+    const uint16_t maxSt = htotal - WIDE1080P_FRONT_PORCH_MIN;
+    if (minSp >= maxSt) {
+        SerialM.println(F("wide1080p: no room for blanking, skipped"));
+        return;
+    }
+
+    const uint16_t oldW = disSt - disSp;
+    uint16_t targetW = (uint16_t)((float)htotal * WIDE1080P_ACTIVE_RATIO) & 0xfffe;
+    if (targetW > (maxSt - minSp)) {
+        targetW = (maxSt - minSp) & 0xfffe;
+    }
+    if (targetW <= oldW) {
+        return; // already as wide as it can get
+    }
+    const float factor = (float)targetW / (float)oldW;
+
+    // Display window: grow around its center, then nudge inside the limits.
+    int32_t newDisSp = (int32_t)((disSp + disSt) / 2) - (int32_t)(targetW / 2);
+    int32_t shift = 0;
+    if (newDisSp < (int32_t)minSp) {
+        shift = (int32_t)minSp - newDisSp;
+    } else if (newDisSp + targetW > (int32_t)maxSt) {
+        shift = (int32_t)maxSt - (newDisSp + targetW);
+    }
+    newDisSp += shift;
+    const int32_t newDisSt = newDisSp + targetW;
+
+    // Memory window: same factor, same center offset, same shift, so the picture
+    // keeps its position relative to the display window.
+    const uint16_t newMemW = (uint16_t)((float)(memSt - memSp) * factor);
+    int32_t newMemSp = (int32_t)((memSp + memSt) / 2) - (int32_t)(newMemW / 2) + shift;
+    int32_t newMemSt = newMemSp + newMemW;
+    if (newMemSp < 2) {
+        newMemSp = 2;
+    }
+    if (newMemSt > (int32_t)htotal - 2) {
+        newMemSt = (int32_t)htotal - 2;
+    }
+
+    // hscale: 1024 = 1:1, lower = wider. Keep it away from the bypass value.
+    uint16_t hscale = (uint16_t)((1024.0f * (float)oldW / (float)targetW) + 0.5f);
+    if (hscale > 1022) hscale = 1022;
+    if (hscale < 512) hscale = 512; // > 2x is never expected here
+
+    GBS::VDS_DIS_HB_SP::write((uint16_t)newDisSp & 0xfffe);
+    GBS::VDS_DIS_HB_ST::write((uint16_t)newDisSt & 0xfffe);
+    GBS::VDS_HB_SP::write((uint16_t)newMemSp & 0xfffe);
+    GBS::VDS_HB_ST::write((uint16_t)newMemSt & 0xfffe);
+    GBS::VDS_HSCALE_BYPS::write(0);
+    GBS::VDS_HSCALE::write(hscale);
+
+    SerialM.print(F("wide1080p: htotal "));
+    SerialM.print(htotal);
+    SerialM.print(F(" dis "));
+    SerialM.print(GBS::VDS_DIS_HB_SP::read());
+    SerialM.print('-');
+    SerialM.print(GBS::VDS_DIS_HB_ST::read());
+    SerialM.print(F(" mem "));
+    SerialM.print(GBS::VDS_HB_SP::read());
+    SerialM.print('-');
+    SerialM.print(GBS::VDS_HB_ST::read());
+    SerialM.print(F(" hscale "));
+    SerialM.println(hscale);
+}
+
 // Pro: apply per-slot Developer and Screen tweaks on top of the preset.
 // Called from doPostPresetLoadSteps after the preset has written its own register
 // values, so these overrides have the final say. Sentinel values (0 / 0xFF / 0xFFFF)
@@ -4183,6 +4298,9 @@ void doPostPresetLoadSteps()
     // Pro: Apply ADV7280 settings (brightness, contrast, saturation, smooth, I2P)
     ADV_applySlotSettings();
 
+    // Pro: 1080p 16:9 fill (before per-slot overrides, so manual Scale still wins)
+    applyWide1080p();
+
     // Pro: Apply Developer menu and Screen per-slot overrides (if any)
     applyDevOverrides();
 
@@ -4334,6 +4452,8 @@ static File initSlotsFile()
     emptySlot.screenVScale_ntsc = 0;     emptySlot.screenVScale_pal = 0;
     // Per-slot SyncWatcher mode (inherit global)
     emptySlot.slotSyncwatcherMode = 0;
+    // 1080p 16:9 fill (off = stock behavior)
+    emptySlot.wantWide1080p = 0;
 
     for (int i = 0; i < SLOTS_TOTAL; i++) {
         emptySlot.slot = i;
@@ -4447,6 +4567,8 @@ bool saveSlotSettingsAt(int slotIndex, const char* name)
     slotData.screenVScale_pal = uopt->screenVScale_pal;
     // Per-slot SyncWatcher mode
     slotData.slotSyncwatcherMode = uopt->slotSyncwatcherMode;
+    // 1080p 16:9 fill
+    slotData.wantWide1080p = uopt->wantWide1080p;
 
     // Update name if provided
     if (name != NULL) {
@@ -4582,6 +4704,8 @@ bool loadSlotSettings()
     uopt->screenVScale_pal = slotData.screenVScale_pal;
     // Per-slot SyncWatcher mode (0=inherit, 1=force on, 2=force off)
     uopt->slotSyncwatcherMode = (slotData.slotSyncwatcherMode <= 2) ? slotData.slotSyncwatcherMode : 0;
+    // 1080p 16:9 fill (reserved bytes of older slots are 0 = off)
+    uopt->wantWide1080p = (slotData.wantWide1080p <= 1) ? slotData.wantWide1080p : 0;
 
     return true;
 }
@@ -7755,6 +7879,8 @@ void loadDefaultUserOptions()
     uopt->screenVScale_ntsc = 0;     uopt->screenVScale_pal = 0;
     // Per-slot SyncWatcher mode (inherit global)
     uopt->slotSyncwatcherMode = 0;
+    // 1080p 16:9 fill off by default
+    uopt->wantWide1080p = 0;
 }
 
 //RF_PRE_INIT() {
@@ -8236,6 +8362,9 @@ void setup()
             // ADV Hue
             uopt->advHue = (uint8_t)((f.read() - '0') * 100 + (f.read() - '0') * 10 + (f.read() - '0'));
             if (uopt->advHue > 254) uopt->advHue = 128;
+            // 1080p 16:9 fill (older prefs files end before this: read() = -1 -> off)
+            uopt->wantWide1080p = (uint8_t)(f.read() - '0');
+            if (uopt->wantWide1080p > 1) uopt->wantWide1080p = 0;
 
             f.close();
         }
@@ -8552,6 +8681,9 @@ void updateWebSocketData()
             }
             if (uopt->disableExternalClockGenerator) {
                 toSend[5] |= (1 << 2);
+            }
+            if (uopt->wantWide1080p) {
+                toSend[5] |= (1 << 3);
             }
 
             // send ping and stats
@@ -10224,6 +10356,19 @@ void handleType2Command(char argument)
             uopt->enableCalibrationADC = !uopt->enableCalibrationADC;
             saveUserPrefs();
             break;
+        case 'Y': {
+            // 1080p 16:9 fill toggle
+            uopt->wantWide1080p = !uopt->wantWide1080p;
+            SerialM.print(F("1080p 16:9 fill "));
+            SerialM.println(uopt->wantWide1080p ? F("on") : F("off"));
+            saveUserPrefs();
+            uint8_t presetId = GBS::GBS_PRESET_ID::read();
+            if ((presetId == 0x05 || presetId == 0x15) && !GBS::GBS_PRESET_CUSTOM::read()) {
+                applyPresets(getVideoMode());
+            } else if (presetId == 0x05 || presetId == 0x15) {
+                SerialM.println(F("custom preset active: load the stock 1080p preset, toggle, then save the slot"));
+            }
+        } break;
         case 'x':
             uopt->preferScalingRgbhv = !uopt->preferScalingRgbhv;
             SerialM.print(F("preferScalingRgbhv: "));
@@ -11672,6 +11817,7 @@ void saveUserPrefs()
     f.write(uopt->advHue / 100 + '0');
     f.write((uopt->advHue / 10) % 10 + '0');
     f.write(uopt->advHue % 10 + '0');
+    f.write(uopt->wantWide1080p + '0'); // 1080p 16:9 fill
     f.close();
 }
 
