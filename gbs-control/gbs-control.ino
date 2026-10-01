@@ -38,6 +38,7 @@
 static inline void writeBytes(uint8_t slaveRegister, uint8_t *values, uint8_t numValues);
 const uint8_t *loadPresetFromLittleFS(byte forVideoMode);
 bool loadSlotSettings();
+void forgetSyncLossBlank();
 
 SSD1306Wire display(0x3c, D2, D1); //inits I2C address & pins for OLED
 const int pin_clk = 14;            //D5 = GPIO14 (input of one direction for encoder)
@@ -794,8 +795,6 @@ static inline void setScreenVMoveSt(uint16_t v) { if (isPalGroup()) uopt->screen
 static inline void setScreenVMoveSp(uint16_t v) { if (isPalGroup()) uopt->screenVMoveSp_pal = v; else uopt->screenVMoveSp_ntsc = v; }
 static inline void setScreenHScale(uint16_t v)  { if (isPalGroup()) uopt->screenHScale_pal  = v; else uopt->screenHScale_ntsc  = v; }
 static inline void setScreenVScale(uint16_t v)  { if (isPalGroup()) uopt->screenVScale_pal  = v; else uopt->screenVScale_ntsc  = v; }
-
-void forgetSyncLossBlank();
 
 void setResetParameters()
 {
@@ -3321,10 +3320,6 @@ uint32_t getPllRate()
 //
 // Only applied on top of built-in presets: a custom (slot) preset is a full
 // register dump and already contains whatever window/scale was saved with it.
-void saveUserPrefs();
-void applyPresets(uint8_t result);
-uint8_t getVideoMode();
-
 #ifndef WIDE1080P_ACTIVE_RATIO
 #define WIDE1080P_ACTIVE_RATIO 0.8727f // 1920 / 2200 (CEA-861 1080p active / total)
 #endif
