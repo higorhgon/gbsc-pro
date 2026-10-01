@@ -84,8 +84,10 @@ const Structs = {
         { name: "slotSyncwatcherMode", type: "byte", size: 1 },
         // --- PRO: 1080p 16:9 fill ---
         { name: "wantWide1080p", type: "byte", size: 1 },
+        { name: "wide1080pZoomH", type: "byte", size: 1 },
+        { name: "wide1080pZoomV", type: "byte", size: 1 },
         // --- Reserved for future expansion ---
-        { name: "reserved", type: "byte", size: 21 },
+        { name: "reserved", type: "byte", size: 19 },
     ],
 };
 // =====================================================================
@@ -690,6 +692,9 @@ const createWebSocket = () => {
                             break;
                         case "wide1080p":
                             toggleMethod(button, (optionByte2 & 0x08) == 0x08);
+                            break;
+                        case "blankOnSyncLoss":
+                            toggleMethod(button, (optionByte2 & 0x10) == 0x10);
                             break;
                     }
                 });

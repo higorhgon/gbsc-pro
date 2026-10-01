@@ -1252,7 +1252,8 @@
                   <ul class="gbs-help">
                     <li>The 1920 x 1080 preset shows 4:3 sources pillarboxed inside the 16:9 frame.</li>
                     <li>Enable this for anamorphic widescreen games (PS2, Wii, GameCube) to stretch the picture to the full width.</li>
-                    <li>Fine tune with Scale / Borders, then save the slot to keep it.</li>
+                    <li>Fill Zoom crops the black borders the console draws around the picture (1% per step, up to 15%). The value is shown in the console.</li>
+                    <li>Save the slot to keep these settings. Avoid mixing with Scale, which overrides the fill.</li>
                   </ul>
                 </td>
                 <td
@@ -1261,6 +1262,72 @@
                   gbs-click="normal"
                   class="gbs-icon"
                   gbs-toggle-switch="wide1080p"
+                >
+                  toggle_off
+                </td>
+              </tr>
+              <tr>
+                <td class="gbs-padding__left-16">Fill Zoom Horizontal</td>
+                <td>
+                  <div class="gbs-flex">
+                    <button
+                      gbs-message="b"
+                      gbs-message-type="user"
+                      gbs-click="normal"
+                      class="gbs-button gbs-button__control gbs-icon"
+                    >
+                      remove
+                    </button>
+                    <button
+                      gbs-message="c"
+                      gbs-message-type="user"
+                      gbs-click="normal"
+                      class="gbs-button gbs-button__control gbs-icon"
+                    >
+                      add
+                    </button>
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td class="gbs-padding__left-16">Fill Zoom Vertical</td>
+                <td>
+                  <div class="gbs-flex">
+                    <button
+                      gbs-message="d"
+                      gbs-message-type="user"
+                      gbs-click="normal"
+                      class="gbs-button gbs-button__control gbs-icon"
+                    >
+                      remove
+                    </button>
+                    <button
+                      gbs-message="j"
+                      gbs-message-type="user"
+                      gbs-click="normal"
+                      class="gbs-button gbs-button__control gbs-icon"
+                    >
+                      add
+                    </button>
+                  </div>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  Blank on Sync Loss
+                  <!-- prettier-ignore -->
+                  <ul class="gbs-help">
+                    <li>Shows a black picture while the source drops sync for a moment, keeping the output timing so the TV doesn't resync.</li>
+                    <li>Hides the flashing when a console resets its video, e.g. PS2 launching games from OPL / Neutrino.</li>
+                    <li>Off = stock behavior (freeze the last captured frame).</li>
+                  </ul>
+                </td>
+                <td
+                  gbs-message="k"
+                  gbs-message-type="user"
+                  gbs-click="normal"
+                  class="gbs-icon"
+                  gbs-toggle-switch="blankOnSyncLoss"
                 >
                   toggle_off
                 </td>

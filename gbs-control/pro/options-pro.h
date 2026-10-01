@@ -142,6 +142,10 @@ enum TVMODE_PresetPreference : uint8_t {
     /* Per-slot SyncWatcher override */ \
     uint8_t  slotSyncwatcherMode;   /* 0=inherit global, 1=force ON, 2=force OFF */ \
     /* 1080p 16:9 fill (anamorphic widescreen sources) */ \
-    uint8_t  wantWide1080p;         /* 0=4:3 pillarbox (stock), 1=stretch to 16:9 */
+    uint8_t  wantWide1080p;         /* 0=4:3 pillarbox (stock), 1=stretch to 16:9 */ \
+    uint8_t  wide1080pZoomH;        /* 1080p fill horizontal crop, percent (0-15) */ \
+    uint8_t  wide1080pZoomV;        /* 1080p fill vertical crop, percent (0-15) */ \
+    /* Black picture while the source drops sync (global, not per slot) */ \
+    uint8_t  blankOnSyncLoss;       /* 0=freeze last frame (stock), 1=blank */
 
 #endif // OPTIONS_PRO_H_

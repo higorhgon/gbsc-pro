@@ -95,8 +95,10 @@ const Structs: StructDescriptors = {
     { name: "slotSyncwatcherMode", type: "byte", size: 1 }, // 0=inherit global, 1=force ON, 2=force OFF
     // --- PRO: 1080p 16:9 fill ---
     { name: "wantWide1080p", type: "byte", size: 1 }, // 0=off (4:3 pillarbox), 1=on
+    { name: "wide1080pZoomH", type: "byte", size: 1 }, // horizontal crop, percent
+    { name: "wide1080pZoomV", type: "byte", size: 1 }, // vertical crop, percent
     // --- Reserved for future expansion ---
-    { name: "reserved", type: "byte", size: 21 },
+    { name: "reserved", type: "byte", size: 19 },
   ],
 };
 
@@ -772,6 +774,9 @@ const createWebSocket = () => {
               break;
             case "wide1080p":
               toggleMethod(button, (optionByte2 & 0x08) == 0x08);
+              break;
+            case "blankOnSyncLoss":
+              toggleMethod(button, (optionByte2 & 0x10) == 0x10);
               break;
           }
         });

@@ -795,9 +795,12 @@ static inline void setScreenVMoveSp(uint16_t v) { if (isPalGroup()) uopt->screen
 static inline void setScreenHScale(uint16_t v)  { if (isPalGroup()) uopt->screenHScale_pal  = v; else uopt->screenHScale_ntsc  = v; }
 static inline void setScreenVScale(uint16_t v)  { if (isPalGroup()) uopt->screenVScale_pal  = v; else uopt->screenVScale_ntsc  = v; }
 
+void forgetSyncLossBlank();
+
 void setResetParameters()
 {
     SerialM.printf("[%lu] <reset>\n", millis());
+    forgetSyncLossBlank();
     rto->videoStandardInput = 0;
     rto->videoIsFrozen = false;
     rto->applyPresetDoneStage = 0;
@@ -3307,25 +3310,195 @@ uint32_t getPllRate()
 // 960p/1024p (a 4:3 signal the TV can stretch), the side bars are part of the
 // 1080p signal, so a TV in game mode has nothing left to stretch.
 //
-// This widens the display blanking window (VDS_DIS_HB) and the memory blanking
-// window (VDS_HB) around their centers by the same factor and enables the
-// horizontal scaler with the matching ratio, so the same source line covers
-// ~the full 16:9 width.
+// This widens the display window (VDS_DIS_HB), enables the horizontal scaler and
+// places the memory fetch window (VDS_HB) so the same source line covers ~the full
+// 16:9 width. An optional zoom (H and V, percent) crops the black borders most
+// consoles draw around the picture, since game-mode TVs can't overscan.
+//
+// The stock register values are snapshotted after every preset load so the
+// toggle and the zoom can be re-applied live, without reloading the preset
+// (a reload restarts the output and the TV has to resync).
 //
 // Only applied on top of built-in presets: a custom (slot) preset is a full
 // register dump and already contains whatever window/scale was saved with it.
-// Fine tuning: use Scale / Borders in the web UI, then save the slot.
+void saveUserPrefs();
+void applyPresets(uint8_t result);
+uint8_t getVideoMode();
+
 #ifndef WIDE1080P_ACTIVE_RATIO
 #define WIDE1080P_ACTIVE_RATIO 0.8727f // 1920 / 2200 (CEA-861 1080p active / total)
 #endif
 #define WIDE1080P_BACK_PORCH_MIN 24    // clocks kept between HSync end and active start
 #define WIDE1080P_FRONT_PORCH_MIN 16   // clocks kept between active end and HTotal
+#define WIDE1080P_FETCH_GUARD_PX 8     // source pixels hidden on top of the preset's own fetch-start margin
+#define WIDE1080P_ZOOM_MAX 15          // percent of the picture cropped per axis
 
+struct Wide1080pStock
+{
+    bool valid;
+    uint8_t presetId;
+    bool hscaleByps;
+    uint16_t htotal, hsEnd;
+    uint16_t disSp, disSt, memSp, memSt, hscale;
+    uint16_t vscale, disVbSp, disVbSt, ifVbSt, ifVbSp;
+};
+static Wide1080pStock w1080 = {};
+
+static bool wide1080pStockMatchesPreset()
+{
+    return w1080.valid && !GBS::GBS_PRESET_CUSTOM::read() && GBS::GBS_PRESET_ID::read() == w1080.presetId;
+}
+
+static void wide1080pWriteStock()
+{
+    GBS::VDS_DIS_HB_SP::write(w1080.disSp);
+    GBS::VDS_DIS_HB_ST::write(w1080.disSt);
+    GBS::VDS_EXT_HB_SP::write(w1080.disSp);
+    GBS::VDS_EXT_HB_ST::write(w1080.disSt);
+    GBS::VDS_HB_SP::write(w1080.memSp);
+    GBS::VDS_HB_ST::write(w1080.memSt);
+    GBS::VDS_HSCALE::write(w1080.hscale);
+    GBS::VDS_HSCALE_BYPS::write(w1080.hscaleByps);
+    GBS::VDS_VSCALE::write(w1080.vscale);
+    GBS::IF_VB_ST::write(w1080.ifVbSt);
+    GBS::IF_VB_SP::write(w1080.ifVbSp);
+}
+
+static bool wide1080pWrite()
+{
+    const Wide1080pStock &k = w1080;
+
+    const uint16_t minSp = k.hsEnd + WIDE1080P_BACK_PORCH_MIN;
+    const uint16_t maxSt = k.htotal - WIDE1080P_FRONT_PORCH_MIN;
+    if (minSp >= maxSt) {
+        SerialM.println(F("wide1080p: no room for blanking, skipped"));
+        return false;
+    }
+
+    const uint16_t oldW = k.disSt - k.disSp;
+    uint16_t targetW = (uint16_t)((float)k.htotal * WIDE1080P_ACTIVE_RATIO) & 0xfffe;
+    if (targetW > (maxSt - minSp)) {
+        targetW = (maxSt - minSp) & 0xfffe;
+    }
+    if (targetW <= oldW) {
+        return false; // already as wide as it can get
+    }
+
+    // Display window: grow around its center, then nudge inside the limits.
+    int32_t disSp = (int32_t)((k.disSp + k.disSt) / 2) - (int32_t)(targetW / 2);
+    if (disSp < (int32_t)minSp) {
+        disSp = minSp;
+    } else if (disSp + targetW > (int32_t)maxSt) {
+        disSp = (int32_t)maxSt - targetW;
+    }
+    disSp &= ~1;
+    const int32_t disSt = disSp + targetW;
+
+    // VDS pipeline model, measured from the preset itself: the display window ends
+    // `latency` clocks after the fetch window (58 in both stock 1080p presets) and
+    // starts `lead` source pixels into the fetch. Those first pixels of every fetch
+    // are garbage (they show up as a thin green/ghost column at the left edge), so
+    // the lead must be kept in source pixels, i.e. scaled with the picture.
+    int16_t latency = (int16_t)k.disSt - (int16_t)k.memSt;
+    if (latency < 0) {
+        latency = 0;
+    }
+    int16_t lead = (int16_t)k.disSp - (int16_t)k.memSp - latency;
+    if (lead < 0) {
+        lead = 0;
+    }
+    const float guardPx = lead + WIDE1080P_FETCH_GUARD_PX;
+    const float fetchPx = k.memSt - k.memSp;
+    const float centerPx = (k.disSp + k.disSt) / 2.0f - k.memSp - latency;
+
+    uint8_t zoomH = uopt->wide1080pZoomH;
+    if (zoomH > WIDE1080P_ZOOM_MAX) {
+        zoomH = WIDE1080P_ZOOM_MAX;
+    }
+
+    uint16_t hscale = 0;
+    int32_t memSp = 0, memSt = 0;
+    for (;;) {
+        float visible = (float)oldW * (100 - zoomH) / 100.0f;
+        if (visible > fetchPx - guardPx) {
+            visible = fetchPx - guardPx;
+        }
+        // 1024 = 1:1, lower = wider. Truncate so we never show more than `visible`.
+        hscale = (uint16_t)(1024.0f * visible / (float)targetW);
+        if (hscale > 1022) hscale = 1022;
+        if (hscale < 512) hscale = 512;
+        const float s = 1024.0f / (float)hscale;
+        visible = (float)targetW / s;
+
+        float leftPx = centerPx - visible / 2;
+        if (leftPx < guardPx) {
+            leftPx = guardPx;
+        }
+        if (leftPx + visible > fetchPx) {
+            leftPx = fetchPx - visible;
+        }
+
+        // The fetch always starts at source pixel 0, so cropping the left border means
+        // starting it earlier; it may wrap into the previous line's blanking.
+        memSp = (int32_t)lroundf((float)disSp - latency - leftPx * s) & ~1;
+        memSt = (int32_t)lroundf((float)disSt - latency + 2.0f * s) & ~1;
+        if (memSt > disSt) {
+            memSt = disSt;
+        }
+
+        // fetch windows of consecutive lines must not overlap
+        if (memSp + (int32_t)k.htotal >= memSt + 8) {
+            break;
+        }
+        if (zoomH == 0) {
+            SerialM.println(F("wide1080p: fetch window does not fit, skipped"));
+            return false;
+        }
+        zoomH--;
+    }
+    if (zoomH != uopt->wide1080pZoomH) {
+        SerialM.print(F("wide1080p: H zoom limited to "));
+        SerialM.println(zoomH);
+    }
+    const uint16_t memSpReg = (memSp < 0) ? (uint16_t)(memSp + k.htotal) & 0xfffe : (uint16_t)memSp;
+
+    GBS::VDS_DIS_HB_SP::write((uint16_t)disSp);
+    GBS::VDS_DIS_HB_ST::write((uint16_t)disSt);
+    GBS::VDS_EXT_HB_SP::write((uint16_t)disSp);
+    GBS::VDS_EXT_HB_ST::write((uint16_t)disSt);
+    GBS::VDS_HB_SP::write(memSpReg);
+    GBS::VDS_HB_ST::write((uint16_t)memSt);
+    GBS::VDS_HSCALE_BYPS::write(0);
+    GBS::VDS_HSCALE::write(hscale);
+
+    // Vertical zoom: scale up and skip half of the cropped source lines at the top
+    // (same mechanism as Screen Move V), the bottom ones fall outside the display.
+    uint8_t zoomV = uopt->wide1080pZoomV;
+    if (zoomV > WIDE1080P_ZOOM_MAX) {
+        zoomV = WIDE1080P_ZOOM_MAX;
+    }
+    uint16_t vscale = k.vscale;
+    uint16_t skip = 0;
+    if (zoomV > 0 && k.disVbSt > k.disVbSp) {
+        vscale = (uint16_t)((float)k.vscale * (100 - zoomV) / 100.0f + 0.5f);
+        const float srcLines = (float)(k.disVbSt - k.disVbSp) * k.vscale / 1024.0f;
+        skip = (uint16_t)lroundf(srcLines * (1.0f - (float)vscale / k.vscale) / 2.0f);
+    }
+    GBS::VDS_VSCALE::write(vscale);
+    GBS::IF_VB_ST::write(k.ifVbSt + skip);
+    GBS::IF_VB_SP::write(k.ifVbSp + skip);
+
+    SerialM.printf("wide1080p: htotal %u dis %u-%u mem %u-%u hscale %u zoom H%u%% V%u%% vscale %u skip %u\n",
+                   k.htotal, GBS::VDS_DIS_HB_SP::read(), GBS::VDS_DIS_HB_ST::read(),
+                   GBS::VDS_HB_SP::read(), GBS::VDS_HB_ST::read(), GBS::VDS_HSCALE::read(),
+                   zoomH, zoomV, GBS::VDS_VSCALE::read(), skip);
+    return true;
+}
+
+// Called from doPostPresetLoadSteps, right after the preset wrote its registers.
 void applyWide1080p()
 {
-    if (!uopt->wantWide1080p) {
-        return;
-    }
+    w1080.valid = false;
     if (rto->presetID != 0x05 && rto->presetID != 0x15) {
         return;
     }
@@ -3333,86 +3506,81 @@ void applyWide1080p()
         return;
     }
 
-    const uint16_t htotal = GBS::VDS_HSYNC_RST::read();
+    Wide1080pStock &k = w1080;
+    k.presetId = rto->presetID;
+    k.htotal = GBS::VDS_HSYNC_RST::read();
     const uint16_t hsSt = GBS::VDS_HS_ST::read();
     const uint16_t hsSp = GBS::VDS_HS_SP::read();
-    const uint16_t disSt = GBS::VDS_DIS_HB_ST::read(); // active end
-    const uint16_t disSp = GBS::VDS_DIS_HB_SP::read(); // active start
-    const uint16_t memSt = GBS::VDS_HB_ST::read();
-    const uint16_t memSp = GBS::VDS_HB_SP::read();
+    k.hsEnd = (hsSt > hsSp) ? hsSt : hsSp;
+    k.disSt = GBS::VDS_DIS_HB_ST::read(); // active end
+    k.disSp = GBS::VDS_DIS_HB_SP::read(); // active start
+    k.memSt = GBS::VDS_HB_ST::read();
+    k.memSp = GBS::VDS_HB_SP::read();
+    k.hscale = GBS::VDS_HSCALE::read();
+    k.hscaleByps = GBS::VDS_HSCALE_BYPS::read();
+    k.vscale = GBS::VDS_VSCALE::read();
+    k.disVbSp = GBS::VDS_DIS_VB_SP::read();
+    k.disVbSt = GBS::VDS_DIS_VB_ST::read();
+    k.ifVbSt = GBS::IF_VB_ST::read();
+    k.ifVbSp = GBS::IF_VB_SP::read();
 
     // The stock presets have non-wrapped windows (SP < ST) and HSync near 0.
     // Anything else means the timings were changed elsewhere: don't guess.
-    if (disSp >= disSt || memSp >= memSt || htotal == 0) {
+    if (k.disSp >= k.disSt || k.memSp >= k.memSt || k.htotal == 0) {
         SerialM.println(F("wide1080p: unexpected H windows, skipped"));
         return;
     }
+    k.valid = true;
 
-    const uint16_t hsEnd = (hsSt > hsSp) ? hsSt : hsSp;
-    const uint16_t minSp = hsEnd + WIDE1080P_BACK_PORCH_MIN;
-    const uint16_t maxSt = htotal - WIDE1080P_FRONT_PORCH_MIN;
-    if (minSp >= maxSt) {
-        SerialM.println(F("wide1080p: no room for blanking, skipped"));
+    if (uopt->wantWide1080p) {
+        wide1080pWrite();
+    }
+}
+
+// Re-applies the 1080p fill / zoom on the running preset. Returns false when the
+// preset has to be reloaded instead (custom preset, or not a stock 1080p one).
+bool wide1080pRefreshLive()
+{
+    if (!wide1080pStockMatchesPreset()) {
+        return false;
+    }
+    if (uopt->wantWide1080p) {
+        if (!wide1080pWrite()) {
+            wide1080pWriteStock();
+        }
+    } else {
+        wide1080pWriteStock();
+    }
+    return true;
+}
+
+static void wide1080pAfterChange()
+{
+    saveUserPrefs();
+    uint8_t presetId = GBS::GBS_PRESET_ID::read();
+    if (presetId != 0x05 && presetId != 0x15) {
+        return; // applied on the next 1080p preset load
+    }
+    if (GBS::GBS_PRESET_CUSTOM::read()) {
+        SerialM.println(F("custom preset active: load the stock 1080p preset, adjust, then save the slot"));
         return;
     }
-
-    const uint16_t oldW = disSt - disSp;
-    uint16_t targetW = (uint16_t)((float)htotal * WIDE1080P_ACTIVE_RATIO) & 0xfffe;
-    if (targetW > (maxSt - minSp)) {
-        targetW = (maxSt - minSp) & 0xfffe;
+    if (!wide1080pRefreshLive()) {
+        applyPresets(getVideoMode());
     }
-    if (targetW <= oldW) {
-        return; // already as wide as it can get
+}
+
+static void wide1080pStepZoom(uint8_t *zoom, int8_t step, char axis)
+{
+    int16_t z = (int16_t)*zoom + step;
+    if (z < 0) z = 0;
+    if (z > WIDE1080P_ZOOM_MAX) z = WIDE1080P_ZOOM_MAX;
+    *zoom = (uint8_t)z;
+    SerialM.printf("1080p fill zoom %c: %u%%\n", axis, *zoom);
+    if (!uopt->wantWide1080p) {
+        SerialM.println(F("(takes effect with 1080p 16:9 Fill on)"));
     }
-    const float factor = (float)targetW / (float)oldW;
-
-    // Display window: grow around its center, then nudge inside the limits.
-    int32_t newDisSp = (int32_t)((disSp + disSt) / 2) - (int32_t)(targetW / 2);
-    int32_t shift = 0;
-    if (newDisSp < (int32_t)minSp) {
-        shift = (int32_t)minSp - newDisSp;
-    } else if (newDisSp + targetW > (int32_t)maxSt) {
-        shift = (int32_t)maxSt - (newDisSp + targetW);
-    }
-    newDisSp += shift;
-    const int32_t newDisSt = newDisSp + targetW;
-
-    // Memory window: same factor, same center offset, same shift, so the picture
-    // keeps its position relative to the display window.
-    const uint16_t newMemW = (uint16_t)((float)(memSt - memSp) * factor);
-    int32_t newMemSp = (int32_t)((memSp + memSt) / 2) - (int32_t)(newMemW / 2) + shift;
-    int32_t newMemSt = newMemSp + newMemW;
-    if (newMemSp < 2) {
-        newMemSp = 2;
-    }
-    if (newMemSt > (int32_t)htotal - 2) {
-        newMemSt = (int32_t)htotal - 2;
-    }
-
-    // hscale: 1024 = 1:1, lower = wider. Keep it away from the bypass value.
-    uint16_t hscale = (uint16_t)((1024.0f * (float)oldW / (float)targetW) + 0.5f);
-    if (hscale > 1022) hscale = 1022;
-    if (hscale < 512) hscale = 512; // > 2x is never expected here
-
-    GBS::VDS_DIS_HB_SP::write((uint16_t)newDisSp & 0xfffe);
-    GBS::VDS_DIS_HB_ST::write((uint16_t)newDisSt & 0xfffe);
-    GBS::VDS_HB_SP::write((uint16_t)newMemSp & 0xfffe);
-    GBS::VDS_HB_ST::write((uint16_t)newMemSt & 0xfffe);
-    GBS::VDS_HSCALE_BYPS::write(0);
-    GBS::VDS_HSCALE::write(hscale);
-
-    SerialM.print(F("wide1080p: htotal "));
-    SerialM.print(htotal);
-    SerialM.print(F(" dis "));
-    SerialM.print(GBS::VDS_DIS_HB_SP::read());
-    SerialM.print('-');
-    SerialM.print(GBS::VDS_DIS_HB_ST::read());
-    SerialM.print(F(" mem "));
-    SerialM.print(GBS::VDS_HB_SP::read());
-    SerialM.print('-');
-    SerialM.print(GBS::VDS_HB_ST::read());
-    SerialM.print(F(" hscale "));
-    SerialM.println(hscale);
+    wide1080pAfterChange();
 }
 
 // Pro: apply per-slot Developer and Screen tweaks on top of the preset.
@@ -3503,6 +3671,7 @@ void applyDevOverrides()
 void doPostPresetLoadSteps()
 {
     //unsigned long postLoadTimer = millis();
+    forgetSyncLossBlank();
 
     // adco->r_gain gets applied if uopt->enableAutoGain is set.
     if (uopt->enableAutoGain) {
@@ -4454,6 +4623,8 @@ static File initSlotsFile()
     emptySlot.slotSyncwatcherMode = 0;
     // 1080p 16:9 fill (off = stock behavior)
     emptySlot.wantWide1080p = 0;
+    emptySlot.wide1080pZoomH = 0;
+    emptySlot.wide1080pZoomV = 0;
 
     for (int i = 0; i < SLOTS_TOTAL; i++) {
         emptySlot.slot = i;
@@ -4569,6 +4740,8 @@ bool saveSlotSettingsAt(int slotIndex, const char* name)
     slotData.slotSyncwatcherMode = uopt->slotSyncwatcherMode;
     // 1080p 16:9 fill
     slotData.wantWide1080p = uopt->wantWide1080p;
+    slotData.wide1080pZoomH = uopt->wide1080pZoomH;
+    slotData.wide1080pZoomV = uopt->wide1080pZoomV;
 
     // Update name if provided
     if (name != NULL) {
@@ -4706,6 +4879,8 @@ bool loadSlotSettings()
     uopt->slotSyncwatcherMode = (slotData.slotSyncwatcherMode <= 2) ? slotData.slotSyncwatcherMode : 0;
     // 1080p 16:9 fill (reserved bytes of older slots are 0 = off)
     uopt->wantWide1080p = (slotData.wantWide1080p <= 1) ? slotData.wantWide1080p : 0;
+    uopt->wide1080pZoomH = (slotData.wide1080pZoomH <= WIDE1080P_ZOOM_MAX) ? slotData.wide1080pZoomH : 0;
+    uopt->wide1080pZoomV = (slotData.wide1080pZoomV <= WIDE1080P_ZOOM_MAX) ? slotData.wide1080pZoomV : 0;
 
     return true;
 }
@@ -4987,6 +5162,40 @@ void freezeVideo()
   rto->videoIsFrozen = true;*/
     //Serial.print("f");
     GBS::CAPTURE_ENABLE::write(0);
+}
+
+// Pro: black picture while the source drops sync, with the output timing untouched,
+// so the TV neither resyncs nor shows the frozen / half-captured frames of a console
+// resetting its video (PS2 launching games from OPL / Neutrino). The display vblank
+// is made to never end; VDS_BLK_BF_EN (set by every preset) cuts the video to black.
+#define SYNC_LOSS_BLANK_POLLS 2    // consecutive no-sync polls before blanking (1 = transient)
+#define SYNC_LOSS_UNBLANK_POLLS 8  // stable polls before showing the picture again
+static bool syncLossBlanked = false;
+static uint16_t syncLossSavedDisVbSp = 0;
+
+void blankOutputOnSyncLoss()
+{
+    if (syncLossBlanked || rto->outModeHdBypass || rto->presetID == 0) {
+        return;
+    }
+    syncLossSavedDisVbSp = GBS::VDS_DIS_VB_SP::read();
+    GBS::VDS_DIS_VB_SP::write(0x7ff); // beyond VSYNC_RST: active video never starts
+    syncLossBlanked = true;
+}
+
+void unblankOutput()
+{
+    if (!syncLossBlanked) {
+        return;
+    }
+    GBS::VDS_DIS_VB_SP::write(syncLossSavedDisVbSp);
+    syncLossBlanked = false;
+}
+
+// a preset (re)load rewrote VDS_DIS_VB_SP, the saved value is stale
+void forgetSyncLossBlank()
+{
+    syncLossBlanked = false;
 }
 
 uint8_t getVideoMode()
@@ -6678,6 +6887,9 @@ void runSyncWatcher()
             freezeVideo();
             return; // do nothing else
         }
+        if (rto->noSyncCounter == SYNC_LOSS_BLANK_POLLS && uopt->blankOnSyncLoss) {
+            blankOutputOnSyncLoss();
+        }
 
         rto->phaseIsSet = 0;
 
@@ -6985,6 +7197,10 @@ void runSyncWatcher()
             }
             rto->videoIsFrozen = true; // ensures unfreeze
             unfreezeVideo();           // called 2nd time here to make sure
+        }
+
+        if (rto->continousStableCounter >= SYNC_LOSS_UNBLANK_POLLS) {
+            unblankOutput();
         }
 
         if (rto->continousStableCounter == 4) {
@@ -7893,6 +8109,9 @@ void loadDefaultUserOptions()
     uopt->slotSyncwatcherMode = 0;
     // 1080p 16:9 fill off by default
     uopt->wantWide1080p = 0;
+    uopt->wide1080pZoomH = 0;
+    uopt->wide1080pZoomV = 0;
+    uopt->blankOnSyncLoss = 1;
 }
 
 //RF_PRE_INIT() {
@@ -8377,6 +8596,14 @@ void setup()
             // 1080p 16:9 fill (older prefs files end before this: read() = -1 -> off)
             uopt->wantWide1080p = (uint8_t)(f.read() - '0');
             if (uopt->wantWide1080p > 1) uopt->wantWide1080p = 0;
+            // 1080p fill zoom H / V (one char each, '0' + percent)
+            uopt->wide1080pZoomH = (uint8_t)(f.read() - '0');
+            if (uopt->wide1080pZoomH > WIDE1080P_ZOOM_MAX) uopt->wide1080pZoomH = 0;
+            uopt->wide1080pZoomV = (uint8_t)(f.read() - '0');
+            if (uopt->wide1080pZoomV > WIDE1080P_ZOOM_MAX) uopt->wide1080pZoomV = 0;
+            // blank on sync loss (older prefs files: read() = -1 -> default on)
+            uopt->blankOnSyncLoss = (uint8_t)(f.read() - '0');
+            if (uopt->blankOnSyncLoss > 1) uopt->blankOnSyncLoss = 1;
 
             f.close();
         }
@@ -8696,6 +8923,9 @@ void updateWebSocketData()
             }
             if (uopt->wantWide1080p) {
                 toSend[5] |= (1 << 3);
+            }
+            if (uopt->blankOnSyncLoss) {
+                toSend[5] |= (1 << 4);
             }
 
             // send ping and stats
@@ -10368,19 +10598,34 @@ void handleType2Command(char argument)
             uopt->enableCalibrationADC = !uopt->enableCalibrationADC;
             saveUserPrefs();
             break;
-        case 'Y': {
+        case 'Y':
             // 1080p 16:9 fill toggle
             uopt->wantWide1080p = !uopt->wantWide1080p;
             SerialM.print(F("1080p 16:9 fill "));
             SerialM.println(uopt->wantWide1080p ? F("on") : F("off"));
-            saveUserPrefs();
-            uint8_t presetId = GBS::GBS_PRESET_ID::read();
-            if ((presetId == 0x05 || presetId == 0x15) && !GBS::GBS_PRESET_CUSTOM::read()) {
-                applyPresets(getVideoMode());
-            } else if (presetId == 0x05 || presetId == 0x15) {
-                SerialM.println(F("custom preset active: load the stock 1080p preset, toggle, then save the slot"));
+            wide1080pAfterChange();
+            break;
+        case 'k':
+            uopt->blankOnSyncLoss = !uopt->blankOnSyncLoss;
+            SerialM.print(F("blank on sync loss "));
+            SerialM.println(uopt->blankOnSyncLoss ? F("on") : F("off"));
+            if (!uopt->blankOnSyncLoss) {
+                unblankOutput();
             }
-        } break;
+            saveUserPrefs();
+            break;
+        case 'b':
+            wide1080pStepZoom(&uopt->wide1080pZoomH, -1, 'H');
+            break;
+        case 'c':
+            wide1080pStepZoom(&uopt->wide1080pZoomH, 1, 'H');
+            break;
+        case 'd':
+            wide1080pStepZoom(&uopt->wide1080pZoomV, -1, 'V');
+            break;
+        case 'j':
+            wide1080pStepZoom(&uopt->wide1080pZoomV, 1, 'V');
+            break;
         case 'x':
             uopt->preferScalingRgbhv = !uopt->preferScalingRgbhv;
             SerialM.print(F("preferScalingRgbhv: "));
@@ -11830,6 +12075,9 @@ void saveUserPrefs()
     f.write((uopt->advHue / 10) % 10 + '0');
     f.write(uopt->advHue % 10 + '0');
     f.write(uopt->wantWide1080p + '0'); // 1080p 16:9 fill
+    f.write(uopt->wide1080pZoomH + '0');
+    f.write(uopt->wide1080pZoomV + '0');
+    f.write(uopt->blankOnSyncLoss + '0');
     f.close();
 }
 
