@@ -5161,20 +5161,29 @@ void freezeVideo()
 
 // Pro: black picture while the source drops sync, with the output timing untouched,
 // so the TV neither resyncs nor shows the frozen / half-captured frames of a console
-// resetting its video (PS2 launching games from OPL / Neutrino). The display vblank
-// is made to never end; VDS_BLK_BF_EN (set by every preset) cuts the video to black.
+// resetting its video (PS2 launching games from OPL / Neutrino). The VDS color gains
+// are zeroed so the output sits at the Y/U/V offsets: the same black the picture has
+// after the same processing (incl. HDMI Limited Range), not the darker DAC blank level.
 #define SYNC_LOSS_BLANK_POLLS 2    // consecutive no-sync polls before blanking (1 = transient)
 #define SYNC_LOSS_UNBLANK_POLLS 8  // stable polls before showing the picture again
 static bool syncLossBlanked = false;
-static uint16_t syncLossSavedDisVbSp = 0;
+static uint8_t syncLossSavedGain[5];
 
 void blankOutputOnSyncLoss()
 {
     if (syncLossBlanked || rto->outModeHdBypass || rto->presetID == 0) {
         return;
     }
-    syncLossSavedDisVbSp = GBS::VDS_DIS_VB_SP::read();
-    GBS::VDS_DIS_VB_SP::write(0x7ff); // beyond VSYNC_RST: active video never starts
+    syncLossSavedGain[0] = GBS::VDS_Y_GAIN::read();
+    syncLossSavedGain[1] = GBS::VDS_UCOS_GAIN::read();
+    syncLossSavedGain[2] = GBS::VDS_VCOS_GAIN::read();
+    syncLossSavedGain[3] = GBS::VDS_USIN_GAIN::read();
+    syncLossSavedGain[4] = GBS::VDS_VSIN_GAIN::read();
+    GBS::VDS_Y_GAIN::write(0);
+    GBS::VDS_UCOS_GAIN::write(0);
+    GBS::VDS_VCOS_GAIN::write(0);
+    GBS::VDS_USIN_GAIN::write(0);
+    GBS::VDS_VSIN_GAIN::write(0);
     syncLossBlanked = true;
     SerialM.printf("[%lu] picture blanked\n", millis());
 }
@@ -5184,12 +5193,16 @@ void unblankOutput()
     if (!syncLossBlanked) {
         return;
     }
-    GBS::VDS_DIS_VB_SP::write(syncLossSavedDisVbSp);
+    GBS::VDS_Y_GAIN::write(syncLossSavedGain[0]);
+    GBS::VDS_UCOS_GAIN::write(syncLossSavedGain[1]);
+    GBS::VDS_VCOS_GAIN::write(syncLossSavedGain[2]);
+    GBS::VDS_USIN_GAIN::write(syncLossSavedGain[3]);
+    GBS::VDS_VSIN_GAIN::write(syncLossSavedGain[4]);
     syncLossBlanked = false;
     SerialM.printf("[%lu] picture restored\n", millis());
 }
 
-// a preset (re)load rewrote VDS_DIS_VB_SP, the saved value is stale
+// a preset (re)load rewrote the VDS color gains, the saved values are stale
 void forgetSyncLossBlank()
 {
     syncLossBlanked = false;
