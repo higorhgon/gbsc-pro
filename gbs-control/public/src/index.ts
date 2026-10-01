@@ -361,6 +361,8 @@ const createWebSocket = () => {
       messageDataAt3,
       messageDataAt4,
       messageDataAt5,
+      messageDataAt6,
+      messageDataAt7,
     ] = message.data;
 
     if (messageDataAt0 === "$") {
@@ -687,6 +689,13 @@ const createWebSocket = () => {
 
       if (activeSlotButton) {
         GBSControl.ui.slotButtonList.forEach(toggleButtonActive(slotId));
+      }
+
+      if (messageDataAt6 && messageDataAt7) {
+        const zoomH = document.getElementById("gbs-wide-zoom-h-value");
+        const zoomV = document.getElementById("gbs-wide-zoom-v-value");
+        if (zoomH) zoomH.textContent = `${messageDataAt6.charCodeAt(0) - 65}%`;
+        if (zoomV) zoomV.textContent = `${messageDataAt7.charCodeAt(0) - 65}%`;
       }
 
       if (messageDataAt3 && messageDataAt4 && messageDataAt5) {

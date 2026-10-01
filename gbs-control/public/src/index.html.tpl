@@ -1252,7 +1252,7 @@
                   <ul class="gbs-help">
                     <li>The 1920 x 1080 preset shows 4:3 sources pillarboxed inside the 16:9 frame.</li>
                     <li>Enable this for anamorphic widescreen games (PS2, Wii, GameCube) to stretch the picture to the full width.</li>
-                    <li>Fill Zoom crops the black borders the console draws around the picture (1% per step, up to 15%). The value is shown in the console.</li>
+                    <li>Fill Zoom crops the black borders the console draws around the picture (1% per step, up to 15%).</li>
                     <li>Save the slot to keep these settings. Avoid mixing with Scale, which overrides the fill.</li>
                   </ul>
                 </td>
@@ -1278,6 +1278,7 @@
                     >
                       remove
                     </button>
+                    <span id="gbs-wide-zoom-h-value" style="min-width: 48px; text-align: center; padding: 8px;">-</span>
                     <button
                       gbs-message="c"
                       gbs-message-type="user"
@@ -1301,6 +1302,7 @@
                     >
                       remove
                     </button>
+                    <span id="gbs-wide-zoom-v-value" style="min-width: 48px; text-align: center; padding: 8px;">-</span>
                     <button
                       gbs-message="j"
                       gbs-message-type="user"

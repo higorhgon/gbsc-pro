@@ -5176,6 +5176,7 @@ void blankOutputOnSyncLoss()
     syncLossSavedDisVbSp = GBS::VDS_DIS_VB_SP::read();
     GBS::VDS_DIS_VB_SP::write(0x7ff); // beyond VSYNC_RST: active video never starts
     syncLossBlanked = true;
+    SerialM.printf("[%lu] picture blanked\n", millis());
 }
 
 void unblankOutput()
@@ -5185,6 +5186,7 @@ void unblankOutput()
     }
     GBS::VDS_DIS_VB_SP::write(syncLossSavedDisVbSp);
     syncLossBlanked = false;
+    SerialM.printf("[%lu] picture restored\n", millis());
 }
 
 // a preset (re)load rewrote VDS_DIS_VB_SP, the saved value is stale
@@ -8822,7 +8824,7 @@ void updateWebSocketData()
     if (rto->webServerEnabled && rto->webServerStarted) {
         if (webSocket.connectedClients() > 0) {
 
-            constexpr size_t MESSAGE_LEN = 6;
+            constexpr size_t MESSAGE_LEN = 8;
             char toSend[MESSAGE_LEN] = {0};
             toSend[0] = '#'; // makeshift ping in slot 0
 
@@ -8922,6 +8924,9 @@ void updateWebSocketData()
             if (uopt->blankOnSyncLoss) {
                 toSend[5] |= (1 << 4);
             }
+            // 1080p fill zoom H / V, percent as 'A' + n
+            toSend[6] = (char)('A' + uopt->wide1080pZoomH);
+            toSend[7] = (char)('A' + uopt->wide1080pZoomV);
 
             // send ping and stats
             if (ESP.getFreeHeap() > 6000) {

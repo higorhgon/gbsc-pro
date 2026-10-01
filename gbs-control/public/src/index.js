@@ -312,7 +312,7 @@ const createWebSocket = () => {
         clearTimeout(GBSControl.wsTimeout);
         GBSControl.wsTimeout = setTimeout(timeOutWs, 2700);
         GBSControl.isWsActive = true;
-        const [messageDataAt0, messageDataAt1, messageDataAt2, messageDataAt3, messageDataAt4, messageDataAt5,] = message.data;
+        const [messageDataAt0, messageDataAt1, messageDataAt2, messageDataAt3, messageDataAt4, messageDataAt5, messageDataAt6, messageDataAt7,] = message.data;
         if (messageDataAt0 === "$") {
             // Pro status: $[inputType][format][2x][smooth][sharpness][ace][lumaGain][chromaGain][chromaMax][gammaGain][responseSpeed]
             //             [yFilter][cFilter][wyFilter][wyOverride][comb][hdmiLimitedRange][syncStripper]
@@ -613,6 +613,14 @@ const createWebSocket = () => {
             const activeSlotButton = document.querySelector(`[gbs-element-ref="${slotId}"]`);
             if (activeSlotButton) {
                 GBSControl.ui.slotButtonList.forEach(toggleButtonActive(slotId));
+            }
+            if (messageDataAt6 && messageDataAt7) {
+                const zoomH = document.getElementById("gbs-wide-zoom-h-value");
+                const zoomV = document.getElementById("gbs-wide-zoom-v-value");
+                if (zoomH)
+                    zoomH.textContent = `${messageDataAt6.charCodeAt(0) - 65}%`;
+                if (zoomV)
+                    zoomV.textContent = `${messageDataAt7.charCodeAt(0) - 65}%`;
             }
             if (messageDataAt3 && messageDataAt4 && messageDataAt5) {
                 const optionByte0 = messageDataAt3.charCodeAt(0);

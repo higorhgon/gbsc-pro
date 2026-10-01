@@ -1963,7 +1963,7 @@ section[name="alert"] {
                   <ul class="gbs-help">
                     <li>The 1920 x 1080 preset shows 4:3 sources pillarboxed inside the 16:9 frame.</li>
                     <li>Enable this for anamorphic widescreen games (PS2, Wii, GameCube) to stretch the picture to the full width.</li>
-                    <li>Fill Zoom crops the black borders the console draws around the picture (1% per step, up to 15%). The value is shown in the console.</li>
+                    <li>Fill Zoom crops the black borders the console draws around the picture (1% per step, up to 15%).</li>
                     <li>Save the slot to keep these settings. Avoid mixing with Scale, which overrides the fill.</li>
                   </ul>
                 </td>
@@ -1989,6 +1989,7 @@ section[name="alert"] {
                     >
                       remove
                     </button>
+                    <span id="gbs-wide-zoom-h-value" style="min-width: 48px; text-align: center; padding: 8px;">-</span>
                     <button
                       gbs-message="c"
                       gbs-message-type="user"
@@ -2012,6 +2013,7 @@ section[name="alert"] {
                     >
                       remove
                     </button>
+                    <span id="gbs-wide-zoom-v-value" style="min-width: 48px; text-align: center; padding: 8px;">-</span>
                     <button
                       gbs-message="j"
                       gbs-message-type="user"
@@ -3055,7 +3057,7 @@ const createWebSocket = () => {
         clearTimeout(GBSControl.wsTimeout);
         GBSControl.wsTimeout = setTimeout(timeOutWs, 2700);
         GBSControl.isWsActive = true;
-        const [messageDataAt0, messageDataAt1, messageDataAt2, messageDataAt3, messageDataAt4, messageDataAt5,] = message.data;
+        const [messageDataAt0, messageDataAt1, messageDataAt2, messageDataAt3, messageDataAt4, messageDataAt5, messageDataAt6, messageDataAt7,] = message.data;
         if (messageDataAt0 === "$") {
             // Pro status: $[inputType][format][2x][smooth][sharpness][ace][lumaGain][chromaGain][chromaMax][gammaGain][responseSpeed]
             //             [yFilter][cFilter][wyFilter][wyOverride][comb][hdmiLimitedRange][syncStripper]
@@ -3356,6 +3358,14 @@ const createWebSocket = () => {
             const activeSlotButton = document.querySelector(`[gbs-element-ref="${slotId}"]`);
             if (activeSlotButton) {
                 GBSControl.ui.slotButtonList.forEach(toggleButtonActive(slotId));
+            }
+            if (messageDataAt6 && messageDataAt7) {
+                const zoomH = document.getElementById("gbs-wide-zoom-h-value");
+                const zoomV = document.getElementById("gbs-wide-zoom-v-value");
+                if (zoomH)
+                    zoomH.textContent = `${messageDataAt6.charCodeAt(0) - 65}%`;
+                if (zoomV)
+                    zoomV.textContent = `${messageDataAt7.charCodeAt(0) - 65}%`;
             }
             if (messageDataAt3 && messageDataAt4 && messageDataAt5) {
                 const optionByte0 = messageDataAt3.charCodeAt(0);
