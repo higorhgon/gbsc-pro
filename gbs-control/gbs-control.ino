@@ -5162,12 +5162,15 @@ void freezeVideo()
 // Pro: black picture while the source drops sync, with the output timing untouched,
 // so the TV neither resyncs nor shows the frozen / half-captured frames of a console
 // resetting its video (PS2 launching games from OPL / Neutrino). The VDS color gains
-// are zeroed so the output sits at the Y/U/V offsets: the same black the picture has
-// after the same processing (incl. HDMI Limited Range), not the darker DAC blank level.
-#define SYNC_LOSS_BLANK_POLLS 2    // consecutive no-sync polls before blanking (1 = transient)
-#define SYNC_LOSS_UNBLANK_POLLS 8  // stable polls before showing the picture again
+// and chroma offsets are zeroed so the output sits at the Y offset with neutral chroma:
+// the same black the picture has after the same processing (incl. HDMI Limited Range),
+// not the darker DAC blank level, and not tinted by the U/V offsets that normally
+// cancel the ADC chroma bias.
+// Even a one-poll sync drop upsets the ADC clamp, tinting black purple for ~250 ms,
+// so blank right away and only show the picture again once the clamp has settled.
+#define SYNC_LOSS_UNBLANK_POLLS 14 // stable polls (~20 ms each) before showing the picture again
 static bool syncLossBlanked = false;
-static uint8_t syncLossSavedGain[5];
+static uint8_t syncLossSavedGain[7];
 
 void blankOutputOnSyncLoss()
 {
@@ -5179,11 +5182,15 @@ void blankOutputOnSyncLoss()
     syncLossSavedGain[2] = GBS::VDS_VCOS_GAIN::read();
     syncLossSavedGain[3] = GBS::VDS_USIN_GAIN::read();
     syncLossSavedGain[4] = GBS::VDS_VSIN_GAIN::read();
+    syncLossSavedGain[5] = GBS::VDS_U_OFST::read();
+    syncLossSavedGain[6] = GBS::VDS_V_OFST::read();
     GBS::VDS_Y_GAIN::write(0);
     GBS::VDS_UCOS_GAIN::write(0);
     GBS::VDS_VCOS_GAIN::write(0);
     GBS::VDS_USIN_GAIN::write(0);
     GBS::VDS_VSIN_GAIN::write(0);
+    GBS::VDS_U_OFST::write(0);
+    GBS::VDS_V_OFST::write(0);
     syncLossBlanked = true;
     SerialM.printf("[%lu] picture blanked\n", millis());
 }
@@ -5198,6 +5205,8 @@ void unblankOutput()
     GBS::VDS_VCOS_GAIN::write(syncLossSavedGain[2]);
     GBS::VDS_USIN_GAIN::write(syncLossSavedGain[3]);
     GBS::VDS_VSIN_GAIN::write(syncLossSavedGain[4]);
+    GBS::VDS_U_OFST::write(syncLossSavedGain[5]);
+    GBS::VDS_V_OFST::write(syncLossSavedGain[6]);
     syncLossBlanked = false;
     SerialM.printf("[%lu] picture restored\n", millis());
 }
@@ -6895,10 +6904,10 @@ void runSyncWatcher()
             syncLostAt = millis();
             SerialM.printf("\n[%lu] sync lost (mode %d)\n", syncLostAt, rto->videoStandardInput);
             freezeVideo();
+            if (uopt->blankOnSyncLoss) {
+                blankOutputOnSyncLoss();
+            }
             return; // do nothing else
-        }
-        if (rto->noSyncCounter == SYNC_LOSS_BLANK_POLLS && uopt->blankOnSyncLoss) {
-            blankOutputOnSyncLoss();
         }
 
         rto->phaseIsSet = 0;
