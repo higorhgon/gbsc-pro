@@ -490,13 +490,25 @@ void resetOLEDScreenSaverTimer() {
 
 void applyRGBtoYUVConversion(void)
 {
-    int r = uopt->gbsColorR - 128;
-    int g = uopt->gbsColorG - 128;
-    int b = uopt->gbsColorB - 128;
+    int r = uopt->gbsColorR;
+    int g = uopt->gbsColorG;
+    int b = uopt->gbsColorB;
 
-    GBS::VDS_Y_OFST::write(constrain(0.299f * r + 0.587f * g + 0.114f * b, -128, 127));
-    GBS::VDS_U_OFST::write(constrain(-0.14713f * r - 0.28886f * g + 0.436f * b, -128, 127));
-    GBS::VDS_V_OFST::write(constrain(0.615f * r - 0.51499f * g - 0.10001f * b, -128, 127));
+    // 128/128/128 is the RGB-input neutral that empty slots and default options store.
+    // On YUV inputs it would wipe the offsets that cancel the ADC chroma bias (black
+    // turns green), so treat it as "never adjusted" and use the YUV neutral instead.
+    if (uopt->bcshAdjustMode != 0 && r == 128 && g == 128 && b == 128) {
+        r = 129;
+        g = 123;
+        b = 132;
+    }
+    r -= 128;
+    g -= 128;
+    b -= 128;
+
+    GBS::VDS_Y_OFST::write((int8_t)lroundf(constrain(0.299f * r + 0.587f * g + 0.114f * b, -128, 127)));
+    GBS::VDS_U_OFST::write((int8_t)lroundf(constrain(-0.14713f * r - 0.28886f * g + 0.436f * b, -128, 127)));
+    GBS::VDS_V_OFST::write((int8_t)lroundf(constrain(0.615f * r - 0.51499f * g - 0.10001f * b, -128, 127)));
 }
 
 void readYUVtoRGBConversion(void)
