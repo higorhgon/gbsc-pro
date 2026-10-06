@@ -1102,6 +1102,7 @@
                 <div class="gbs-icon">add_circle_outline</div>
                 <div>Brightness</div>
               </button>
+              <span id="gbs-color-bri-value" class="gbs-color-value" style="min-width: 56px; align-self: center; text-align: center;">-</span>
               <button
                 gbs-message="T"
                 gbs-message-type="user"
@@ -1122,6 +1123,7 @@
                 <div class="gbs-icon">add_circle_outline</div>
                 <div>Contrast</div>
               </button>
+              <span id="gbs-color-con-value" class="gbs-color-value" style="min-width: 56px; align-self: center; text-align: center;">-</span>
               <button
                 gbs-message="M"
                 gbs-message-type="user"
@@ -1142,6 +1144,7 @@
                 <div class="gbs-icon">add_circle_outline</div>
                 <div>Pb/U gain</div>
               </button>
+              <span id="gbs-color-u-value" class="gbs-color-value" style="min-width: 56px; align-self: center; text-align: center;">-</span>
               <button
                 gbs-message="H"
                 gbs-message-type="user"
@@ -1162,6 +1165,7 @@
                 <div class="gbs-icon">add_circle_outline</div>
                 <div>Pr/V gain</div>
               </button>
+              <span id="gbs-color-v-value" class="gbs-color-value" style="min-width: 56px; align-self: center; text-align: center;">-</span>
               <button
                 gbs-message="S"
                 gbs-message-type="user"
@@ -1194,8 +1198,9 @@
             </div>
             <ul class="gbs-help">
               <!-- prettier-ignore -->
-              <li>Pb/U gain - change blue-luma gain.</li>
-              <li>Pr/V gain - change red-luma gain.</li>
+              <li>Brightness: luma offset. Contrast: luma gain (128 = 1.0).</li>
+              <li>Pb/U gain - shifts the blue tint (chroma offset). Pr/V gain - shifts the red tint.</li>
+              <li>Brightness and Pb/Pr are saved with the slot; Contrast only with custom presets.</li>
             </ul>
           </fieldset>
         </section>
@@ -1266,7 +1271,7 @@
                   toggle_off
                 </td>
               </tr>
-              <tr>
+              <tr gbs-wide-zoom-row style="display: none;">
                 <td colspan="2">
                   <div class="gbs-flex" style="align-items: center;">
                     <span class="gbs-padding__left-16" style="flex: 1;">Fill Zoom Horizontal</span>
@@ -1292,7 +1297,7 @@
                   </div>
                 </td>
               </tr>
-              <tr>
+              <tr gbs-wide-zoom-row style="display: none;">
                 <td colspan="2">
                   <div class="gbs-flex" style="align-items: center;">
                     <span class="gbs-padding__left-16" style="flex: 1;">Fill Zoom Vertical</span>

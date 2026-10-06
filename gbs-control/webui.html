@@ -1813,6 +1813,7 @@ section[name="alert"] {
                 <div class="gbs-icon">add_circle_outline</div>
                 <div>Brightness</div>
               </button>
+              <span id="gbs-color-bri-value" class="gbs-color-value" style="min-width: 56px; align-self: center; text-align: center;">-</span>
               <button
                 gbs-message="T"
                 gbs-message-type="user"
@@ -1833,6 +1834,7 @@ section[name="alert"] {
                 <div class="gbs-icon">add_circle_outline</div>
                 <div>Contrast</div>
               </button>
+              <span id="gbs-color-con-value" class="gbs-color-value" style="min-width: 56px; align-self: center; text-align: center;">-</span>
               <button
                 gbs-message="M"
                 gbs-message-type="user"
@@ -1853,6 +1855,7 @@ section[name="alert"] {
                 <div class="gbs-icon">add_circle_outline</div>
                 <div>Pb/U gain</div>
               </button>
+              <span id="gbs-color-u-value" class="gbs-color-value" style="min-width: 56px; align-self: center; text-align: center;">-</span>
               <button
                 gbs-message="H"
                 gbs-message-type="user"
@@ -1873,6 +1876,7 @@ section[name="alert"] {
                 <div class="gbs-icon">add_circle_outline</div>
                 <div>Pr/V gain</div>
               </button>
+              <span id="gbs-color-v-value" class="gbs-color-value" style="min-width: 56px; align-self: center; text-align: center;">-</span>
               <button
                 gbs-message="S"
                 gbs-message-type="user"
@@ -1905,8 +1909,9 @@ section[name="alert"] {
             </div>
             <ul class="gbs-help">
               <!-- prettier-ignore -->
-              <li>Pb/U gain - change blue-luma gain.</li>
-              <li>Pr/V gain - change red-luma gain.</li>
+              <li>Brightness: luma offset. Contrast: luma gain (128 = 1.0).</li>
+              <li>Pb/U gain - shifts the blue tint (chroma offset). Pr/V gain - shifts the red tint.</li>
+              <li>Brightness and Pb/Pr are saved with the slot; Contrast only with custom presets.</li>
             </ul>
           </fieldset>
         </section>
@@ -1977,7 +1982,7 @@ section[name="alert"] {
                   toggle_off
                 </td>
               </tr>
-              <tr>
+              <tr gbs-wide-zoom-row style="display: none;">
                 <td colspan="2">
                   <div class="gbs-flex" style="align-items: center;">
                     <span class="gbs-padding__left-16" style="flex: 1;">Fill Zoom Horizontal</span>
@@ -2003,7 +2008,7 @@ section[name="alert"] {
                   </div>
                 </td>
               </tr>
-              <tr>
+              <tr gbs-wide-zoom-row style="display: none;">
                 <td colspan="2">
                   <div class="gbs-flex" style="align-items: center;">
                     <span class="gbs-padding__left-16" style="flex: 1;">Fill Zoom Vertical</span>
@@ -3062,6 +3067,7 @@ const createWebSocket = () => {
         GBSControl.wsTimeout = setTimeout(timeOutWs, 2700);
         GBSControl.isWsActive = true;
         const [messageDataAt0, messageDataAt1, messageDataAt2, messageDataAt3, messageDataAt4, messageDataAt5, messageDataAt6, messageDataAt7,] = message.data;
+        const colorHex = typeof message.data === "string" ? message.data.substring(8, 16) : "";
         if (messageDataAt0 === "$") {
             // Pro status: $[inputType][format][2x][smooth][sharpness][ace][lumaGain][chromaGain][chromaMax][gammaGain][responseSpeed]
             //             [yFilter][cFilter][wyFilter][wyOverride][comb][hdmiLimitedRange][syncStripper]
@@ -3363,6 +3369,17 @@ const createWebSocket = () => {
             if (activeSlotButton) {
                 GBSControl.ui.slotButtonList.forEach(toggleButtonActive(slotId));
             }
+            if (colorHex.length === 8) {
+                const toInt8 = (n) => (n > 127 ? n - 256 : n);
+                const vals = [0, 2, 4, 6].map((i) => parseInt(colorHex.substring(i, i + 2), 16));
+                const shown = [toInt8(vals[0]), vals[1], toInt8(vals[2]), toInt8(vals[3])];
+                ["bri", "con", "u", "v"].forEach((id, i) => {
+                    const el = document.getElementById(`gbs-color-${id}-value`);
+                    if (el && !isNaN(shown[i])) {
+                        el.textContent = id === "con" || shown[i] <= 0 ? `${shown[i]}` : `+${shown[i]}`;
+                    }
+                });
+            }
             if (messageDataAt6 && messageDataAt7) {
                 const zoomH = document.getElementById("gbs-wide-zoom-h-value");
                 const zoomV = document.getElementById("gbs-wide-zoom-v-value");
@@ -3449,6 +3466,9 @@ const createWebSocket = () => {
                             break;
                         case "wide1080p":
                             toggleMethod(button, (optionByte2 & 0x08) == 0x08);
+                            document.querySelectorAll("[gbs-wide-zoom-row]").forEach((row) => {
+                                row.style.display = (optionByte2 & 0x08) == 0x08 ? "" : "none";
+                            });
                             break;
                         case "blankOnSyncLoss":
                             toggleMethod(button, (optionByte2 & 0x10) == 0x10);
@@ -3596,7 +3616,12 @@ const updateSlotNames = () => {
     for (let i = 0; i < GBSControl.maxSlots; i++) {
         const el = document.querySelector(`[gbs-slot-id="${i}"]`);
         el.setAttribute("gbs-name", structs.slots[i].name);
-        el.setAttribute("gbs-meta", getSlotPresetName(parseInt(structs.slots[i].presetID, 10)));
+        const presetID = parseInt(structs.slots[i].presetID, 10);
+        let presetName = getSlotPresetName(presetID);
+        if ((presetID === 0x05 || presetID === 0x15) && structs.slots[i].wantWide1080p === 1) {
+            presetName += " Fill";
+        }
+        el.setAttribute("gbs-meta", presetName);
         // Hide slots beyond the visible range
         if (i < visibleSlots) {
             el.style.display = "";

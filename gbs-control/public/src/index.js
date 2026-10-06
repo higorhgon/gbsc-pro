@@ -313,6 +313,7 @@ const createWebSocket = () => {
         GBSControl.wsTimeout = setTimeout(timeOutWs, 2700);
         GBSControl.isWsActive = true;
         const [messageDataAt0, messageDataAt1, messageDataAt2, messageDataAt3, messageDataAt4, messageDataAt5, messageDataAt6, messageDataAt7,] = message.data;
+        const colorHex = typeof message.data === "string" ? message.data.substring(8, 16) : "";
         if (messageDataAt0 === "$") {
             // Pro status: $[inputType][format][2x][smooth][sharpness][ace][lumaGain][chromaGain][chromaMax][gammaGain][responseSpeed]
             //             [yFilter][cFilter][wyFilter][wyOverride][comb][hdmiLimitedRange][syncStripper]
@@ -614,6 +615,17 @@ const createWebSocket = () => {
             if (activeSlotButton) {
                 GBSControl.ui.slotButtonList.forEach(toggleButtonActive(slotId));
             }
+            if (colorHex.length === 8) {
+                const toInt8 = (n) => (n > 127 ? n - 256 : n);
+                const vals = [0, 2, 4, 6].map((i) => parseInt(colorHex.substring(i, i + 2), 16));
+                const shown = [toInt8(vals[0]), vals[1], toInt8(vals[2]), toInt8(vals[3])];
+                ["bri", "con", "u", "v"].forEach((id, i) => {
+                    const el = document.getElementById(`gbs-color-${id}-value`);
+                    if (el && !isNaN(shown[i])) {
+                        el.textContent = id === "con" || shown[i] <= 0 ? `${shown[i]}` : `+${shown[i]}`;
+                    }
+                });
+            }
             if (messageDataAt6 && messageDataAt7) {
                 const zoomH = document.getElementById("gbs-wide-zoom-h-value");
                 const zoomV = document.getElementById("gbs-wide-zoom-v-value");
@@ -700,6 +712,9 @@ const createWebSocket = () => {
                             break;
                         case "wide1080p":
                             toggleMethod(button, (optionByte2 & 0x08) == 0x08);
+                            document.querySelectorAll("[gbs-wide-zoom-row]").forEach((row) => {
+                                row.style.display = (optionByte2 & 0x08) == 0x08 ? "" : "none";
+                            });
                             break;
                         case "blankOnSyncLoss":
                             toggleMethod(button, (optionByte2 & 0x10) == 0x10);
@@ -847,7 +862,12 @@ const updateSlotNames = () => {
     for (let i = 0; i < GBSControl.maxSlots; i++) {
         const el = document.querySelector(`[gbs-slot-id="${i}"]`);
         el.setAttribute("gbs-name", structs.slots[i].name);
-        el.setAttribute("gbs-meta", getSlotPresetName(parseInt(structs.slots[i].presetID, 10)));
+        const presetID = parseInt(structs.slots[i].presetID, 10);
+        let presetName = getSlotPresetName(presetID);
+        if ((presetID === 0x05 || presetID === 0x15) && structs.slots[i].wantWide1080p === 1) {
+            presetName += " Fill";
+        }
+        el.setAttribute("gbs-meta", presetName);
         // Hide slots beyond the visible range
         if (i < visibleSlots) {
             el.style.display = "";

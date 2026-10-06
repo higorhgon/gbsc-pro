@@ -1025,14 +1025,11 @@ void applyRGBPatches()
     }
 }
 
-/// Apply HDMI Limited Range compensation for MS9288 converter.
-/// The MS9288 sets AVI InfoFrame quantization based on resolution VIC code.
-/// We pre-compress to Limited Range so the TV's expansion restores Full Range.
 /// Mode: 0=Off, 1=HD only (720p/1080p), 2=SD only (480p/576p/960p/1024p), 3=All
-void applyHdmiLimitedRange()
+static bool hdmiLimitedRangeActive()
 {
     if (uopt->hdmiLimitedRange == 0 || rto->outModeHdBypass) {
-        return;
+        return false;
     }
 
     uint8_t pid = rto->presetID;
@@ -1047,8 +1044,15 @@ void applyHdmiLimitedRange()
     if (uopt->hdmiLimitedRange == 1 && isHD) needsCompensation = true;
     if (uopt->hdmiLimitedRange == 2 && isSD) needsCompensation = true;
     if (uopt->hdmiLimitedRange == 3 && (isHD || isSD)) needsCompensation = true;
+    return needsCompensation;
+}
 
-    if (needsCompensation) {
+/// Apply HDMI Limited Range compensation for MS9288 converter.
+/// The MS9288 sets AVI InfoFrame quantization based on resolution VIC code.
+/// We pre-compress to Limited Range so the TV's expansion restores Full Range.
+void applyHdmiLimitedRange()
+{
+    if (hdmiLimitedRangeActive()) {
         // Pre-compress Full Range (0-255) to Limited Range (16-235)
         // so TV's expansion restores the original Full Range.
         // Formula: output = input * 219/256 + 16
@@ -1066,6 +1070,23 @@ void applyHdmiLimitedRange()
         GBS::VDS_Y_OFST::write((uint8_t)(int8_t)newOffset);
         SerialM.println(F("HDMI Limited Range applied"));
     }
+}
+
+// Y offset as the user set it, without the HDMI Limited Range compensation
+static int8_t userYOffset()
+{
+    int16_t y = (int8_t)GBS::VDS_Y_OFST::read();
+    if (hdmiLimitedRangeActive()) {
+        y = (int16_t)lroundf((y - 16) * 128.0f / 110.0f);
+    }
+    return (int8_t)constrain(y, -128, 127);
+}
+
+// Keep the saved color balance in step with Brightness / Pb / Pr tweaks, so they
+// are stored with the slot and survive the next preset load.
+static void syncColorOffsetsToOptions()
+{
+    storeYUVOffsetsAsRGB(userYOffset(), (int8_t)GBS::VDS_U_OFST::read(), (int8_t)GBS::VDS_V_OFST::read());
 }
 
 /// Write ADC gain registers, and save in adco->r_gain to properly transfer it
@@ -8846,7 +8867,7 @@ void updateWebSocketData()
     if (rto->webServerEnabled && rto->webServerStarted) {
         if (webSocket.connectedClients() > 0) {
 
-            constexpr size_t MESSAGE_LEN = 8;
+            constexpr size_t MESSAGE_LEN = 16;
             char toSend[MESSAGE_LEN] = {0};
             toSend[0] = '#'; // makeshift ping in slot 0
 
@@ -8949,6 +8970,16 @@ void updateWebSocketData()
             // 1080p fill zoom H / V, percent as 'A' + n
             toSend[6] = (char)('A' + uopt->wide1080pZoomH);
             toSend[7] = (char)('A' + uopt->wide1080pZoomV);
+            // color correction: brightness (Y offset), contrast (Y gain), U / V offsets, 2 hex chars each
+            {
+                static const char hex[] = "0123456789ABCDEF";
+                const uint8_t color[4] = {(uint8_t)userYOffset(), (uint8_t)GBS::VDS_Y_GAIN::read(),
+                                          (uint8_t)GBS::VDS_U_OFST::read(), (uint8_t)GBS::VDS_V_OFST::read()};
+                for (uint8_t i = 0; i < 4; i++) {
+                    toSend[8 + i * 2] = hex[color[i] >> 4];
+                    toSend[9 + i * 2] = hex[color[i] & 0x0f];
+                }
+            }
 
             // send ping and stats
             if (ESP.getFreeHeap() > 6000) {
@@ -10761,6 +10792,7 @@ void handleType2Command(char argument)
             GBS::VDS_Y_OFST::write(GBS::VDS_Y_OFST::read() + 1);
             if (GBS::VDS_Y_OFST::read() == 0x80)
                 GBS::VDS_Y_OFST::write(0x00);
+            syncColorOffsetsToOptions();
             break;
         case 'T':
             // Y_offset -
@@ -10768,6 +10800,7 @@ void handleType2Command(char argument)
             if (GBS::VDS_Y_OFST::read() == 0x7F) {
                 GBS::VDS_Y_OFST::write(0x00);
             }
+            syncColorOffsetsToOptions();
             break;
         case 'N':
             // Contrast +
@@ -10789,6 +10822,7 @@ void handleType2Command(char argument)
             if (GBS::VDS_U_OFST::read() == 0x80) {
                 GBS::VDS_U_OFST::write(0x00);
             }
+            syncColorOffsetsToOptions();
             break;
         case 'H':
             // U_offset -
@@ -10798,6 +10832,7 @@ void handleType2Command(char argument)
             if (GBS::VDS_U_OFST::read() == 0x7F) {
                 GBS::VDS_U_OFST::write(0x00);
             }
+            syncColorOffsetsToOptions();
             break;
         case 'P':
             // V_offset +
@@ -10807,6 +10842,7 @@ void handleType2Command(char argument)
             if (GBS::VDS_V_OFST::read() == 0x80) {
                 GBS::VDS_V_OFST::write(0x00);
             }
+            syncColorOffsetsToOptions();
             break;
         case 'S':
             // V_offset -
@@ -10816,6 +10852,7 @@ void handleType2Command(char argument)
             if (GBS::VDS_V_OFST::read() == 0x7F) {
                 GBS::VDS_V_OFST::write(0x00);
             }
+            syncColorOffsetsToOptions();
             break;
         case 'V':
             // Цвет +
@@ -10906,6 +10943,7 @@ void handleType2Command(char argument)
                 SerialM.println("YPbPr:defauit");
             }
             readYUVtoRGBConversion();
+            applyHdmiLimitedRange();
             break;
         case 'I':
             if (irEnabled == 0) {

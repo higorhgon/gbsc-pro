@@ -511,15 +511,17 @@ void applyRGBtoYUVConversion(void)
     GBS::VDS_V_OFST::write((int8_t)lroundf(constrain(0.615f * r - 0.51499f * g - 0.10001f * b, -128, 127)));
 }
 
+void storeYUVOffsetsAsRGB(int y, int u, int v)
+{
+    uopt->gbsColorR = (uint8_t)lroundf(constrain(y + 1.13983f * v + 128, 0, 255));
+    uopt->gbsColorG = (uint8_t)lroundf(constrain(y - 0.39465f * u - 0.58060f * v + 128, 0, 255));
+    uopt->gbsColorB = (uint8_t)lroundf(constrain(y + 2.03211f * u + 128, 0, 255));
+}
+
 void readYUVtoRGBConversion(void)
 {
-    int8_t y = (int8_t)GBS::VDS_Y_OFST::read();
-    int8_t u = (int8_t)GBS::VDS_U_OFST::read();
-    int8_t v = (int8_t)GBS::VDS_V_OFST::read();
-
-    uopt->gbsColorR = constrain(y + 1.13983f * v + 128, 0, 255);
-    uopt->gbsColorG = constrain(y - 0.39465f * u - 0.58060f * v + 128, 0, 255);
-    uopt->gbsColorB = constrain(y + 2.03211f * u + 128, 0, 255);
+    storeYUVOffsetsAsRGB((int8_t)GBS::VDS_Y_OFST::read(), (int8_t)GBS::VDS_U_OFST::read(),
+                         (int8_t)GBS::VDS_V_OFST::read());
 }
 
 // ====================================================================================

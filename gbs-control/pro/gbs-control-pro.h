@@ -221,6 +221,7 @@ void resetOLEDScreenSaverTimer();
 
 void applyRGBtoYUVConversion(void);
 void readYUVtoRGBConversion(void);
+void storeYUVOffsetsAsRGB(int y, int u, int v);
 
 // ====================================================================================
 // Function Declarations - Video Mode
